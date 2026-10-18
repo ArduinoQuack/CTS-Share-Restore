@@ -1,0 +1,38 @@
+name: Build
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Build and verify APK
+        run: python3 build.py
+      - name: Run host-side regression tests
+        run: |
+          mkdir -p build/test-classes
+          java -jar tools/ecj.jar -8 -proc:none \
+            -cp build/classes:tools/android.jar:tools/xposed.jar:tools/xmlpull.jar \
+            -d build/test-classes tests/*.java
+          java -cp build/test-classes:build/classes:tools/android.jar:tools/xposed.jar:tools/xmlpull.jar \
+            dev.dov.ctsshare.ConstructorTest
+          java -cp build/test-classes:build/classes:tools/android.jar:tools/xposed.jar:tools/xmlpull.jar \
+            dev.dov.ctsshare.ActionPlacementTest
+      - name: Upload development build
+        uses: actions/upload-artifact@v4
+        with:
+          name: CTS-Share-Restore-development
+          path: CTS-Share-Restore-0.7.apk
+          if-no-files-found: error
+          retention-days: 14
