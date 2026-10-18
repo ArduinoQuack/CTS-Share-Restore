@@ -1,0 +1,55 @@
+name: Bug report
+description: Report a reproducible CTS Share Restore problem
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: "Remove personal selected content and account data from screenshots and logs before submitting."
+  - type: input
+    id: device
+    attributes:
+      label: Device and Android version
+      placeholder: "Samsung SM-S926U, Android 16"
+    validations:
+      required: true
+  - type: input
+    id: google
+    attributes:
+      label: Google app version
+      placeholder: "17.66.11.ve.arm64"
+    validations:
+      required: true
+  - type: input
+    id: framework
+    attributes:
+      label: Module framework and version
+      placeholder: "Vector 2.2"
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Redacted CTSShare log entries
+      render: text
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I tested the latest release and force-stopped Google after enabling it.
+          required: true
+        - label: I removed personal content, credentials, APKs, and signing keys.
+          required: true
