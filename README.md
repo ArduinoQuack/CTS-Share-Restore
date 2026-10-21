@@ -10,7 +10,7 @@ The control follows Google's current selection UI: it joins the native action ro
 
 ## Features
 
-- Shares the selected image crop through Android's normal share sheet.
+- Shares the selected image crop through Android's normal share sheet, including Gemini.
 - Shares recognized text, or offers text/image choices when both are available.
 - Uses Google's native action-row styling and selection geometry.
 - Tracks animated, resized, zoomed, and edge-adjacent selections.
@@ -26,17 +26,18 @@ The control follows Google's current selection UI: it joins the native action ro
 
 ## Installation
 
-1. Download `CTS-Share-Restore-0.7.apk` from the [latest release](https://github.com/ArduinoQuack/CTS-Share-Restore/releases/latest).
+1. Download `CTS-Share-Restore-1.0.apk` from the [latest release](https://github.com/ArduinoQuack/CTS-Share-Restore/releases/latest).
 2. Install the APK normally.
 3. In your module manager, enable **CTS Share Restore** and scope it to **Google** (`com.google.android.googlequicksearchbox`) only.
-4. Force-stop the Google app, then reopen it. Follow any restart prompt from your framework.
+4. Force-stop the Google and Gemini apps, then reopen Google. Follow any restart prompt from your framework.
 5. Open Circle to Search, select text or an image region, and tap **Share**.
 
 The module has no home-screen or app-drawer entry. Open its information screen through your module manager.
 
+
 ## Compatibility
 
-Version 0.7.0 was verified on a Samsung Galaxy S24+ (`SM-S926U`) with Google `17.66.11.ve.arm64` and Vector.
+Version 1.0.0 was verified on a Samsung Galaxy S24+ (`SM-S926U`) with Google `17.68.17.ve.arm64` and Vector.
 
 Google's selection classes are located from semantic DEX strings and structurally validated. The mapping is cached per installed Google APK and refreshed after an update. This makes ordinary obfuscation changes survivable, but a major internal redesign can still require a module update.
 
@@ -46,9 +47,9 @@ When the native action row cannot be used, the module reads the exact rectangle 
 
 CTS Share Restore does not request internet or broad file access. Selected content is not logged.
 
-- Images come from Google's already-captured screenshot and are cropped into Google's private cache.
+- Images come from Google's already-captured screenshot and are shared as temporary JPEG attachments.
 - Text comes from Google's recognized selection.
-- Temporary shared images older than 24 hours are removed on later shares.
+- Temporary shared images are automatically removed.
 - The Google APK, feature flags, and system partitions are not modified.
 
 To roll back, disable the module and force-stop Google.
