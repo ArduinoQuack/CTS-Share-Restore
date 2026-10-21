@@ -1,8 +1,11 @@
 package dev.dov.ctsshare;
 
 import android.content.ClipData;
+import android.content.ContentResolver;
+import android.content.ContentValues;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.graphics.RectF;
 import android.graphics.Canvas;
@@ -26,6 +29,7 @@ import android.widget.TextView;
 import android.widget.Toast;
 import java.io.File;
 import java.io.FileOutputStream;
+import java.io.OutputStream;
 import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.List;
@@ -41,7 +45,11 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage;
 /** Runtime-discovered hooks. No Google code is shipped. */
 public final class ShareHook implements IXposedHookLoadPackage {
     private static final String GOOGLE = "com.google.android.googlequicksearchbox";
+    private static final String GEMINI = "com.google.android.apps.bard";
     private static final String PROVIDER = GOOGLE + ".provider.fileprovider";
+    private static final String SHARE_PREFS = "cts_share_restore_media";
+    private static final String LAST_MEDIA_URI = "last_uri";
+    private static final long MEDIA_LIFETIME_MS = 60 * 60 * 1000L;
     private static final String OVERLAY = "com.google.android.libraries.lens.view.main.LensOverlayLayout";
     private static final String PREFIX = "CTSShare: ";
     // Vector can instantiate the module before Looper.prepareMainLooper().
@@ -295,29 +303,40 @@ public final class ShareHook implements IXposedHookLoadPackage {
                 int top = clamp(Math.round(crop.top * source.getHeight()), 0, source.getHeight() - 1);
                 int right = clamp(Math.round(crop.right * source.getWidth()), left + 1, source.getWidth());
                 int bottom = clamp(Math.round(crop.bottom * source.getHeight()), top + 1, source.getHeight());
-                output = Bitmap.createBitmap(source, left, top, right - left, bottom - top);
-                File dir = new File(app.getCacheDir(), "cts-share");
-                if (!dir.isDirectory() && !dir.mkdirs()) throw new IllegalStateException("Cannot create temporary share directory");
-                File[] old = dir.listFiles();
-                if (old != null) for (File file : old) {
-                    if (System.currentTimeMillis() - file.lastModified() > 24 * 60 * 60 * 1000L) file.delete();
-                }
-                String name = "selection-" + System.currentTimeMillis() + ".png";
-                File file = new File(dir, name);
-                try (FileOutputStream stream = new FileOutputStream(file)) {
-                    if (!output.compress(Bitmap.CompressFormat.PNG, 100, stream)) throw new IllegalStateException("PNG encoding failed");
-                }
-                Uri uri = new Uri.Builder().scheme("content").authority(PROVIDER)
-                    .appendPath("image_share").appendPath("cts-share").appendPath(name).build();
-                // Provider and cache-path are verified from this exact APK's manifest/resources.
+                Bitmap cropped = Bitmap.createBitmap(source, left, top, right - left, bottom - top);
+                // Google's captured screenshot can be RGBA_F16/wide-gamut. PNG preserves
+                // that representation, but Gemini's Kumiho attachment importer rejects it
+                // as an unsupported image even though other Android share targets accept it.
+                // Copying to ARGB_8888 and encoding JPEG guarantees a conventional 8-bit
+                // image stream while retaining the selected pixels.
+                output = cropped.copy(Bitmap.Config.ARGB_8888, false);
+                if (output == null) throw new IllegalStateException("Cannot normalize crop to ARGB_8888");
+                if (cropped != source && cropped != output) cropped.recycle();
+                String name = "selection-" + System.currentTimeMillis() + ".jpg";
+                Uri uri = publishImage(app, output, name);
+                // Verify the exact stream which the receiving app will open.
                 try (java.io.InputStream probe = app.getContentResolver().openInputStream(uri)) {
                     if (probe == null) throw new IllegalStateException("Image provider could not open the crop");
                 }
-                Intent send = new Intent(Intent.ACTION_SEND).setType("image/png")
-                    .putExtra(Intent.EXTRA_STREAM, uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                send.setClipData(ClipData.newRawUri("Circle to Search selection", uri));
+                Intent send = new Intent(Intent.ACTION_SEND).setType("image/jpeg")
+                    .putExtra(Intent.EXTRA_STREAM, uri)
+                    .putExtra(Intent.EXTRA_TITLE, name)
+                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                // newUri asks the provider for the actual stream MIME type. newRawUri labels
+                // the ClipData as text/uri-list, which strict share targets can reject even
+                // though ACTION_SEND itself says image/png.
+                send.setClipData(ClipData.newUri(app.getContentResolver(), name, uri));
+                // Gemini's small shell app forwards the stream URI to the Gemini surface in
+                // the Google app. Give that intermediary an explicit grant so the hand-off
+                // remains readable after the Android Sharesheet activity has returned.
+                try {
+                    app.grantUriPermission(GEMINI, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                } catch (Throwable e) {
+                    log("Gemini URI grant unavailable: " + e.getClass().getSimpleName());
+                }
                 main.post(() -> launch(context, send));
-                log("crop ready " + (right - left) + "x" + (bottom - top));
+                log("crop ready " + (right - left) + "x" + (bottom - top)
+                    + " via " + uri.getAuthority() + " as " + app.getContentResolver().getType(uri));
             } catch (Throwable e) {
                 log("share failed: " + e);
                 main.post(() -> toast(context, "Share failed; check CTSShare in Vector logs"));
@@ -327,8 +346,80 @@ public final class ShareHook implements IXposedHookLoadPackage {
             }
         });
     }
+
+    /**
+     * Publish a conventional seekable attachment on modern Android. Gemini's media
+     * importer uses decoder and metadata APIs which reject Google's private cache
+     * provider even when its JPEG bytes are valid. A MediaStore item supplies the
+     * file descriptor, MIME metadata, length and display name those APIs expect.
+     */
+    private Uri publishImage(Context app, Bitmap image, String name) throws Exception {
+        if (android.os.Build.VERSION.SDK_INT < 29) return publishPrivateImage(app, image, name);
+
+        final ContentResolver resolver = app.getContentResolver();
+        final SharedPreferences prefs = app.getSharedPreferences(SHARE_PREFS, Context.MODE_PRIVATE);
+        String previous = prefs.getString(LAST_MEDIA_URI, null);
+        if (previous != null) {
+            try { resolver.delete(Uri.parse(previous), null, null); }
+            catch (Throwable e) { log("old MediaStore crop cleanup unavailable: " + e.getClass().getSimpleName()); }
+            prefs.edit().remove(LAST_MEDIA_URI).apply();
+        }
+
+        ContentValues values = new ContentValues();
+        values.put("_display_name", name);
+        values.put("mime_type", "image/jpeg");
+        values.put("relative_path", "Download/.cts-share");
+        values.put("is_pending", Integer.valueOf(1));
+        Uri uri = null;
+        try {
+            uri = resolver.insert(Uri.parse("content://media/external/downloads"), values);
+            if (uri == null) throw new IllegalStateException("MediaStore did not create the attachment");
+            try (OutputStream stream = resolver.openOutputStream(uri)) {
+                if (stream == null) throw new IllegalStateException("MediaStore did not open the attachment");
+                if (!image.compress(Bitmap.CompressFormat.JPEG, 95, stream))
+                    throw new IllegalStateException("JPEG encoding failed");
+            }
+            ContentValues ready = new ContentValues();
+            ready.put("is_pending", Integer.valueOf(0));
+            if (resolver.update(uri, ready, null, null) <= 0)
+                throw new IllegalStateException("MediaStore did not publish the attachment");
+
+            final Uri published = uri;
+            prefs.edit().putString(LAST_MEDIA_URI, published.toString()).apply();
+            Handler handler = mainHandler();
+            if (handler != null) handler.postDelayed(() -> {
+                try { resolver.delete(published, null, null); }
+                catch (Throwable e) { log("delayed MediaStore crop cleanup unavailable: " + e.getClass().getSimpleName()); }
+                if (published.toString().equals(prefs.getString(LAST_MEDIA_URI, null)))
+                    prefs.edit().remove(LAST_MEDIA_URI).apply();
+            }, MEDIA_LIFETIME_MS);
+            return published;
+        } catch (Throwable error) {
+            if (uri != null) try { resolver.delete(uri, null, null); } catch (Throwable ignored) { }
+            if (error instanceof Exception) throw (Exception) error;
+            throw new RuntimeException(error);
+        }
+    }
+
+    private Uri publishPrivateImage(Context app, Bitmap image, String name) throws Exception {
+        File dir = new File(app.getCacheDir(), "cts-share");
+        if (!dir.isDirectory() && !dir.mkdirs()) throw new IllegalStateException("Cannot create temporary share directory");
+        File[] old = dir.listFiles();
+        if (old != null) for (File file : old) {
+            if (System.currentTimeMillis() - file.lastModified() > 24 * 60 * 60 * 1000L) file.delete();
+        }
+        File file = new File(dir, name);
+        try (FileOutputStream stream = new FileOutputStream(file)) {
+            if (!image.compress(Bitmap.CompressFormat.JPEG, 95, stream)) throw new IllegalStateException("JPEG encoding failed");
+        }
+        return new Uri.Builder().scheme("content").authority(PROVIDER)
+            .appendPath("image_share").appendPath("cts-share").appendPath(name).build();
+    }
     private void launch(Context context, Intent send) {
-        try { context.startActivity(Intent.createChooser(send, "Share selection").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); }
+        try {
+            context.startActivity(Intent.createChooser(send, "Share selection")
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION));
+        }
         catch (Throwable e) { log("chooser failed: " + e); toast(context, "Could not open the share sheet"); }
     }
     private static boolean valid(RectF r) {
