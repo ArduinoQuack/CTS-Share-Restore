@@ -25,6 +25,15 @@ final class SelectionUi {
     private final ClassMap map;
     private final LinearLayout standalone;
     private final int rowId;
+    private FrameLayout selectionHost;
+    private View selectionBranch;
+    private static final SelectionLayer.Tree<View> LAYERS=new SelectionLayer.Tree<View>() {
+        public View parent(View view) {return view.getParent() instanceof View?(View)view.getParent():null;}
+        public boolean supportsChildren(View view) {
+            return view instanceof FrameLayout&&!view.getClass().getName().equals(
+                "com.google.android.libraries.lens.view.main.LensOverlayLayout");
+        }
+    };
     private final ViewTreeObserver.OnPreDrawListener preDraw;
     private boolean disposed;
 
@@ -79,7 +88,8 @@ final class SelectionUi {
         } catch(Throwable ignored) { }
         if(standaloneButton.getBackground()==null)setStandaloneBackground(null);
         standalone.addView(standaloneButton,new LinearLayout.LayoutParams(-2,dp(48)));
-        host.addView(standalone,new FrameLayout.LayoutParams(-2,-2,Gravity.TOP|Gravity.LEFT));
+        // Never attach the pill to DecorView. Google can keep RegionView alive below
+        // its results, so visibility checks alone cannot make a root-level pill safe.
         preDraw=()->{if(!disposed)refresh.run();return true;};
         host.getViewTreeObserver().addOnPreDrawListener(preDraw);
     }
@@ -105,37 +115,75 @@ final class SelectionUi {
             button.setVisibility(View.VISIBLE);
             return;
         }
+        if(!attachToSelectionLayer()) {hide();return;}
         RectF bounds=drawnBounds(overlay);
         if(bounds==null||bounds.isEmpty()) {hide();return;}
         // RegionRenderingData is the rectangle used by RegionView.onDraw, including
         // minimum-size expansion and animation. Sharing still uses the original crop.
         button.setVisibility(View.GONE);
         if(button.getParent()!=null)removeButton();
-        standalone.measure(View.MeasureSpec.makeMeasureSpec(host.getWidth(),View.MeasureSpec.AT_MOST),
-            View.MeasureSpec.makeMeasureSpec(host.getHeight(),View.MeasureSpec.AT_MOST));
+        standalone.measure(View.MeasureSpec.makeMeasureSpec(selectionHost.getWidth(),View.MeasureSpec.AT_MOST),
+            View.MeasureSpec.makeMeasureSpec(selectionHost.getHeight(),View.MeasureSpec.AT_MOST));
         int width=standalone.getMeasuredWidth(),height=standalone.getMeasuredHeight();
         if(width<=0||height<=0) {hide();return;}
-        int[] origin=new int[2];host.getLocationInWindow(origin);
-        int[] screen=new int[2];host.getLocationOnScreen(screen);
-        Rect visible=new Rect();host.getWindowVisibleDisplayFrame(visible);
+        int[] origin=new int[2];selectionHost.getLocationInWindow(origin);
+        int[] screen=new int[2];selectionHost.getLocationOnScreen(screen);
+        Rect visible=new Rect();selectionHost.getWindowVisibleDisplayFrame(visible);
         // Android reports the visible frame in screen coordinates, the selection in window coordinates.
         float left=Math.max(0,visible.left-screen[0]),top=Math.max(0,visible.top-screen[1]);
-        float right=Math.min(host.getWidth(),visible.right-screen[0]);
-        float bottom=Math.min(host.getHeight(),visible.bottom-screen[1]);
+        float right=Math.min(selectionHost.getWidth(),visible.right-screen[0]);
+        float bottom=Math.min(selectionHost.getHeight(),visible.bottom-screen[1]);
+        Rect clipped=new Rect();
+        if(!selectionHost.isShown()||!selectionHost.getLocalVisibleRect(clipped)) {hide();return;}
+        left=Math.max(left,clipped.left);top=Math.max(top,clipped.top);
+        right=Math.min(right,clipped.right);bottom=Math.min(bottom,clipped.bottom);
         float density=host.getResources().getDisplayMetrics().density;
         float[] position=ActionPlacement.above(bounds.left-origin[0],bounds.top-origin[1],
             bounds.right-origin[0],bounds.bottom-origin[1],width,height,
             left,top,right,bottom,12*density,8*density);
-        // Position against the actual laid-out origin, including DecorView padding.
+        // If the panel leaves no room, do not clamp the pill on top of the results.
+        if(!ActionPlacement.fits(position[0],position[1],width,height,left,top,right,bottom)) {
+            hide();return;
+        }
+        // Stay beside the native selection in its own parent, below Google's later
+        // siblings (the results). Parent movement and clipping now apply naturally.
         standalone.setTranslationX(position[0]-standalone.getLeft());
         standalone.setTranslationY(position[1]-standalone.getTop());
-        standalone.setVisibility(View.VISIBLE);standalone.bringToFront();
+        standalone.setVisibility(View.VISIBLE);
+    }
+
+    private boolean attachToSelectionLayer() {
+        SelectionLayer.Placement<View> layer=SelectionLayer.find(overlay,host,LAYERS);
+        if(layer==null)return false;
+        FrameLayout parent=(FrameLayout)layer.parent;
+        if(standalone.getParent()!=parent) {
+            if(standalone.getParent() instanceof ViewGroup)((ViewGroup)standalone.getParent()).removeView(standalone);
+            standalone.setVisibility(View.GONE);
+            parent.addView(standalone,parent.indexOfChild(layer.branch)+1,
+                new FrameLayout.LayoutParams(-2,-2,Gravity.TOP|Gravity.LEFT));
+            // Same Z as the adjacent Lens branch, never the top of the window.
+            try {
+                Object z=View.class.getMethod("getZ").invoke(layer.branch);
+                View.class.getMethod("setZ",float.class).invoke(standalone,z);
+            } catch(ReflectiveOperationException ignored) { }
+        }
+        selectionHost=parent;selectionBranch=layer.branch;
+        // A newly inserted results sibling must always remain above Share. If Google
+        // reorders children during transitions, restore only our position beside Lens.
+        int anchor=parent.indexOfChild(selectionBranch),ours=parent.indexOfChild(standalone);
+        if(ours!=anchor+1) {
+            parent.removeView(standalone);
+            parent.addView(standalone,parent.indexOfChild(selectionBranch)+1,
+                new FrameLayout.LayoutParams(-2,-2,Gravity.TOP|Gravity.LEFT));
+        }
+        standalone.setAlpha(selectionBranch.getAlpha());
+        return selectionBranch.isShown()&&selectionBranch.getAlpha()>0.01f;
     }
 
     private TextView visibleAction(ViewGroup row) {
         for(int i=0;i<row.getChildCount();i++) {
             View child=row.getChildAt(i);
-            if(child!=button&&child instanceof TextView&&child.getVisibility()==View.VISIBLE
+            if(child!=button&&child instanceof TextView&&child.isShown()&&child.getAlpha()>0.01f
                 &&((TextView)child).getText().length()>0)return (TextView)child;
         }
         return null;
@@ -190,9 +238,11 @@ final class SelectionUi {
         if(disposed)return;disposed=true;
         ViewTreeObserver observer=host.getViewTreeObserver();
         if(observer.isAlive())observer.removeOnPreDrawListener(preDraw);
-        removeButton();host.removeView(standalone);
+        removeButton();
+        if(standalone.getParent() instanceof ViewGroup)((ViewGroup)standalone.getParent()).removeView(standalone);
     }
     private int id(String name,String type) {
         return host.getResources().getIdentifier(name,type,"com.google.android.googlequicksearchbox");
     }
 }
+
