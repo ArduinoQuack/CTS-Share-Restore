@@ -17,10 +17,30 @@ public final class ActionPlacementTest {
         check(new float[]{210,170},ActionPlacement.above(200,30,400,150,180,96,0,24,739,1536,20,16));
         // Landscape and a restricted visible window still use window-local coordinates.
         check(new float[]{210,174},ActionPlacement.above(200,250,400,400,180,56,0,0,1536,650,20,16));
-        System.out.println("Selection placement and viewport edges: PASS");
+        // Standalone selection from the report stays behind a rising results panel.
+        for(int sheetTop=1536;sheetTop>=0;sheetTop-=8) {
+            boolean covered=ActionPlacement.overlaps(180,400,340,560,0,sheetTop,739,1536);
+            if(covered!=(sheetTop<560))throw new AssertionError("Wrong visibility while dragging sheet: "+sheetTop);
+            if(!covered) {
+                float[] p=ActionPlacement.above(180,400,340,560,96,48,0,0,739,sheetTop,12,8);
+                if(!ActionPlacement.fits(p[0],p[1],96,48,0,0,739,sheetTop))
+                    throw new AssertionError("Action outside available space");
+                if(ActionPlacement.overlaps(p[0],p[1],p[0]+96,p[1]+48,0,sheetTop,739,1536))
+                    throw new AssertionError("Action overlays results");
+            }
+        }
+        // A top-edge fallback cannot be clamped into a fully expanded panel.
+        float[] blocked=ActionPlacement.above(200,5,400,30,96,48,0,0,739,40,12,8);
+        if(ActionPlacement.fits(blocked[0],blocked[1],96,48,0,0,739,40))
+            throw new AssertionError("Expanded sheet left no space for Share");
+        // A side panel which does not intersect the selection must not hide it.
+        if(ActionPlacement.overlaps(20,400,120,560,370,0,739,1536))
+            throw new AssertionError("Disjoint side panel hides selection");
+        System.out.println("Placement, panel drag, full expansion and viewport edges: PASS");
     }
     private static void check(float[] expected,float[] actual) {
         for(int i=0;i<2;i++)if(Math.abs(expected[i]-actual[i])>0.01f)
             throw new AssertionError("coordinate "+i+": expected "+expected[i]+", actual "+actual[i]);
     }
 }
+
