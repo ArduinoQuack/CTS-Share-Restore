@@ -6,7 +6,7 @@
 
 An Xposed-compatible module that restores **Share** for image and text selections in Google Circle to Search.
 
-The control follows Google's current selection UI: it joins the native action row when one is visible, otherwise it appears as a standalone pill above the selected region. It stays hidden in Translate and Live Translate.
+The control follows Google's current selection UI: it joins the native action row when one is visible, otherwise it appears as a standalone pill above the selected region. The standalone pill stays in the Lens view layer, so the results panel covers it normally. It stays hidden in Translate and Live Translate.
 
 ## Features
 
@@ -26,7 +26,7 @@ The control follows Google's current selection UI: it joins the native action ro
 
 ## Installation
 
-1. Download `CTS-Share-Restore-1.0.apk` from the [latest release](https://github.com/ArduinoQuack/CTS-Share-Restore/releases/latest).
+1. Download `CTS-Share-Restore-1.2.apk` from the [latest release](https://github.com/ArduinoQuack/CTS-Share-Restore/releases/latest).
 2. Install the APK normally.
 3. In your module manager, enable **CTS Share Restore** and scope it to **Google** (`com.google.android.googlequicksearchbox`) only.
 4. Force-stop the Google and Gemini apps, then reopen Google. Follow any restart prompt from your framework.
@@ -37,7 +37,7 @@ The module has no home-screen or app-drawer entry. Open its information screen t
 
 ## Compatibility
 
-Version 1.0.0 was verified on a Samsung Galaxy S24+ (`SM-S926U`) with Google `17.68.17.ve.arm64` and Vector.
+Version 1.2.0 was verified on a Samsung Galaxy S24+ (`SM-S926U`) with Google `17.72.13.ve.arm64` and Vector.
 
 Google's selection classes are located from semantic DEX strings and structurally validated. The mapping is cached per installed Google APK and refreshed after an update. This makes ordinary obfuscation changes survivable, but a major internal redesign can still require a module update.
 
@@ -83,3 +83,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidance and [SECURITY.m
 ## License
 
 CTS Share Restore is released under the [MIT License](LICENSE). Google, Android, Circle to Search, Samsung, Vector, and Xposed are trademarks of their respective owners. This project is not affiliated with or endorsed by Google.
+

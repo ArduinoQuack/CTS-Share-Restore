@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.2.0
+
+- Fix Share appearing over Google results.
+- Ignore transparent native actions when joining the selection row.
+
 All notable changes to CTS Share Restore are documented here.
 
 
@@ -31,3 +36,4 @@ All notable changes to CTS Share Restore are documented here.
 
 [1.0.0]: https://github.com/ArduinoQuack/CTS-Share-Restore/releases/tag/v1.0.0
 [0.7.0]: https://github.com/ArduinoQuack/CTS-Share-Restore/releases/tag/v0.7.0
+

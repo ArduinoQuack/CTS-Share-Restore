@@ -58,10 +58,11 @@ key = ROOT / "development.keystore"
 if not key.exists():
     run("keytool", "-genkeypair", "-keystore", key, "-storepass", "android", "-keypass", "android",
         "-alias", "ctsshare", "-dname", "CN=CTS Share Development", "-keyalg", "RSA", "-keysize", "2048", "-validity", "10000")
-apk = ROOT / "CTS-Share-Restore-1.0.apk"
+apk = ROOT / "CTS-Share-Restore-1.2.apk"
 run(sdk / "apksigner", "sign", "--ks", key, "--ks-pass", "pass:android", "--key-pass", "pass:android",
     "--ks-key-alias", "ctsshare", "--out", apk, BUILD / "aligned.apk")
 run(sdk / "apksigner", "verify", "--verbose", apk)
 run(sdk / "zipalign", "-c", "4", apk)
 print(apk)
 print("SHA-256", hashlib.sha256(apk.read_bytes()).hexdigest())
+
