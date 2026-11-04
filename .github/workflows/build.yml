@@ -29,10 +29,13 @@ jobs:
             dev.dov.ctsshare.ConstructorTest
           java -cp build/test-classes:build/classes:tools/android.jar:tools/xposed.jar:tools/xmlpull.jar \
             dev.dov.ctsshare.ActionPlacementTest
+          java -cp build/test-classes:build/classes \
+            dev.dov.ctsshare.SelectionLayerTest
       - name: Upload development build
         uses: actions/upload-artifact@v4
         with:
           name: CTS-Share-Restore-development
-          path: CTS-Share-Restore-0.7.apk
+          path: CTS-Share-Restore-1.2.apk
           if-no-files-found: error
           retention-days: 14
+
